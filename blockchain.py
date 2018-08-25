@@ -1,15 +1,25 @@
 import time
 import json
 import hashlib
+import Crypto
+from Crypto.Hash import SHA
+from Crypto.PublicKey import RSA
+from Crypto.Signature import PKCS1_v1_5
+import binascii
 from urllib.parse import urlparse
 from uuid import uuid4
 from flask import Flask, jsonify, request
 
 
+MINING_SENDER = "THE BLOCKCHAIN"
+MINING_REWARD = 1
+MINING_DIFFICULTY = 4
+
+
 class Blockchain(object):
     def __init__(self):
         self.chain = []
-        self.current_transaction = []
+        self.current_transactions = []
         self.nodes = set()
         self.new_block(previous_hash=1, proof=100)
 
@@ -26,22 +36,38 @@ class Blockchain(object):
         block = {
             'index': len(self.chain) + 1,
             'timestamp': time.time(),
-            'transactions': self.current_transaction,
+            'transactions': self.current_transactions,
             'proof': proof,
             'previous_hash': previous_hash or self.hash(self.chain[-1]),
         }
 
-        self.current_transaction = []
+        self.current_transactions = []
         self.chain.append(block)
         return block
 
-    def new_transaction(self, sender, recipient, amount):
-        self.current_transaction.append({
+    def new_transaction(self, sender, recipient, amount, signature):
+        transaction = {
             'sender': sender,
             'recipient': recipient,
             'amount': amount
-        })
-        return self.last_block['index'] + 1
+        }
+        if sender == MINING_SENDER:
+            self.current_transactions.append(transaction)
+            return self.last_block['index'] + 1
+        else:
+            transaction_verification = self.verify_transaction_signature(sender, signature, transaction)
+            if transaction_verification:
+                self.current_transactions.append(transaction)
+                return self.last_block['index'] + 1
+            else:
+                return False
+
+    @staticmethod
+    def verify_transaction_signature(sender, signature, transaction):
+        public_key = RSA.importKey(binascii.unhexlify(sender))
+        verifier = PKCS1_v1_5.new(public_key)
+        h = SHA.new(str(transaction).encode()).hexdigest()
+        return verifier.verify(h, binascii.unhexlify(signature))
 
     @staticmethod
     def hash(block):
@@ -62,7 +88,7 @@ class Blockchain(object):
     def valid_proof(last_proof, proof):
         guess = f'{last_proof}{proof}'.encode()
         guess_hash = hashlib.sha256(guess).hexdigest()
-        return guess_hash[:4] == "0000"
+        return guess_hash[:MINING_DIFFICULTY] == "0" * MINING_DIFFICULTY
 
 
 app = Flask(__name__)
