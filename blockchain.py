@@ -78,17 +78,54 @@ class Blockchain(object):
     def last_block(self):
         return self.chain[-1]
 
-    def proof_of_work(self, last_proof):
+    def proof_of_work(self, last_block):
+        last_proof = last_block['proof']
+        last_hash = last_block['hash']
+
         proof = 0
-        while not self.valid_proof(last_proof, proof):
+        while not self.valid_proof(last_proof, proof, last_hash):
             proof += 1
         return proof
 
     @staticmethod
-    def valid_proof(last_proof, proof):
-        guess = f'{last_proof}{proof}'.encode()
+    def valid_proof(last_proof, proof, last_hash):
+        guess = f'{last_proof}{proof}{last_hash}'.encode()
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:MINING_DIFFICULTY] == "0" * MINING_DIFFICULTY
+
+    def valid_chain(self, chain):
+        last_block = chain[0]
+        current_index = 1
+
+        while current_index < len(chain):
+            block = chain[current_index]
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+            transactions = block['transactions'][:-1]
+            if not self.valid_proof(last_block['proof'], block['proof'], block['hash']):
+                return False
+            last_block = block
+            current_index += 1
+
+        return True
+
+    def resolve_conflicts(self):
+        neighbors = self.nodes
+        new_chain = None
+        max_length = len(self.chain)
+
+        for node in neighbors:
+            response = request.get('http://' + node + '/chain')
+            if response.status.code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+                if (length > max_length) & (self.valid_chain(chain)):
+                    max_length = length
+                    new_chain = chain
+        if new_chain:
+            self.chain = new_chain
+            return True
+        return False
 
 
 app = Flask(__name__)
